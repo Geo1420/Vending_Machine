@@ -4,6 +4,7 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <AccelStepper.h>
+#include <Servo.h>
 
 // ===== LCD =====
 LiquidCrystal_I2C lcd(0x27,16,2);
@@ -33,209 +34,175 @@ byte readcard[4];
 AccelStepper stepper1(AccelStepper::DRIVER, STEP1, DIR1);
 AccelStepper stepper2(AccelStepper::DRIVER, STEP2, DIR2);
 
-// 200 pasi = 360° la majoritatea NEMA17
-// 180° = 100 pasi
-#define HALF_TURN 100
+#define HALF_TURN 1200
+
+// ===== SERVO =====
+#define PIN_SERVO_1 40
+#define PIN_SERVO_2 41
+#define PIN_SERVO_3 42
+#define PIN_SERVO_4 43
+
+#define SERVO_1_STOP 90
+#define SERVO_2_STOP 90
+#define SERVO_3_STOP 23
+#define SERVO_4_STOP 90
+
+Servo servo1;
+Servo servo2;
+Servo servo3;
+Servo servo4;
 
 // ===== KEYPAD =====
 const byte ROWS = 4;
 const byte COLS = 3;
 
 char keys[ROWS][COLS] = {
-{'1','2','3'},
-{'4','5','6'},
-{'7','8','9'},
-{'*','0','#'}
+  {'1','2','3'},
+  {'4','5','6'},
+  {'7','8','9'},
+  {'*','0','#'}
 };
 
 byte rowPins[ROWS] = {30,31,32,33};
 byte colPins[COLS] = {34,35,36};
 
-Keypad keypad = Keypad(makeKeymap(keys),rowPins,colPins,ROWS,COLS);
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
 char inputCode[3];
-int inputIndex=0;
+int inputIndex = 0;
 
 // ===== BUZZER =====
 #define BUZZER_PIN 8
 
 // ===== CODURI =====
-String validCodes[]={"11","12","13","14"};
+String validCodes[] = {"11","12","13","14"};
 
-void setup(){
+void setup() {
+  Serial.begin(9600);
+  SPI.begin();
+  rc.PCD_Init();
 
-Serial.begin(9600);
+  pinMode(EN1, OUTPUT);
+  pinMode(EN2, OUTPUT);
+  digitalWrite(EN1, LOW);
+  digitalWrite(EN2, LOW);
 
-SPI.begin();
-rc.PCD_Init();
+  stepper1.setMaxSpeed(800);
+  stepper1.setAcceleration(400);
+  stepper2.setMaxSpeed(800);
+  stepper2.setAcceleration(400);
 
-pinMode(EN1,OUTPUT);
-pinMode(EN2,OUTPUT);
+  servo1.attach(PIN_SERVO_1); servo1.write(SERVO_1_STOP);
+  servo2.attach(PIN_SERVO_2); servo2.write(SERVO_2_STOP);
+  servo3.attach(PIN_SERVO_3); servo3.write(SERVO_3_STOP);
+  servo4.attach(PIN_SERVO_4); servo4.write(SERVO_4_STOP);
 
-digitalWrite(EN1,LOW);
-digitalWrite(EN2,LOW);
+  pinMode(BUZZER_PIN, OUTPUT);
 
-stepper1.setMaxSpeed(800);
-stepper1.setAcceleration(400);
-
-stepper2.setMaxSpeed(800);
-stepper2.setAcceleration(400);
-
-pinMode(BUZZER_PIN,OUTPUT);
-
-lcd.begin();
-lcd.backlight();
-
-lcd.setCursor(0,0);
-lcd.print("Introduceti cod");
-
-resetInput();
+  lcd.begin();
+  lcd.backlight();
+  lcd.setCursor(0,0);
+  lcd.print("Introduceti cod");
+  resetInput();
 }
 
-void loop(){
+void loop() {
+  char key = keypad.getKey();
 
-char key = keypad.getKey();
+  if(key && inputIndex < 2){
+    inputCode[inputIndex] = key;
+    inputIndex++;
+    lcd.setCursor(0,1); lcd.print("  "); lcd.setCursor(0,1); lcd.print(inputCode);
+  }
 
-if(key && inputIndex<2){
+  if(inputIndex == 2){
+    String combo = String(inputCode[0]) + String(inputCode[1]);
 
-inputCode[inputIndex]=key;
-inputIndex++;
+    if(!isValidCode(combo)){
+      lcd.clear(); lcd.print("Cod invalid");
+      beepNegative(); delay(1500);
+      resetLCD(); resetInput();
+      return;
+    }
 
-lcd.setCursor(0,1);
-lcd.print("  ");
-lcd.setCursor(0,1);
-lcd.print(inputCode);
+    lcd.clear(); lcd.print("Scanati card");
+
+    if(getid()){
+      int match = 0;
+      for(int i=0;i<N;i++) if(!memcmp(readcard,defcard[i],4)) match++;
+
+      if(match){
+        lcd.clear(); lcd.print("Acces permis");
+        beepPositive();
+
+        // ===== STEPPELERE =====
+        activateSteppers();
+
+        // ===== SERVO corespunzator codului =====
+        activateServo(combo);
+
+      } else {
+        lcd.clear(); lcd.print("Acces respins");
+        beepNegative();
+      }
+
+      delay(2000);
+      resetLCD();
+      resetInput();
+    }
+  }
 }
 
-if(inputIndex==2){
-
-String combo = String(inputCode[0]) + String(inputCode[1]);
-
-if(!isValidCode(combo)){
-
-lcd.clear();
-lcd.print("Cod invalid");
-
-beepNegative();
-delay(1500);
-
-resetLCD();
-resetInput();
-return;
-}
-
-lcd.clear();
-lcd.print("Scanati card");
-
-if(getid()){
-
-int match=0;
-
-for(int i=0;i<N;i++){
-if(!memcmp(readcard,defcard[i],4)) match++;
-}
-
-if(match){
-
-lcd.clear();
-lcd.print("Acces permis");
-
-beepPositive();
-
-activateSteppers();
-
-}else{
-
-lcd.clear();
-lcd.print("Acces respins");
-
-beepNegative();
-}
-
-delay(2000);
-
-resetLCD();
-resetInput();
-}
-}
-}
-
-// ===== MISCARE STEPPER =====
+// ===== STEPPERele =====
 void activateSteppers(){
+  stepper1.move(HALF_TURN);
+  while(stepper1.distanceToGo()!=0) stepper1.run();
 
-stepper1.move(HALF_TURN);
+  delay(500);
 
-while(stepper1.distanceToGo()!=0){
-stepper1.run();
+  stepper2.move(HALF_TURN);
+  while(stepper2.distanceToGo()!=0) stepper2.run();
 }
 
-delay(500);
-
-stepper2.move(HALF_TURN);
-
-while(stepper2.distanceToGo()!=0){
-stepper2.run();
+// ===== SERVO =====
+void activateServo(String combo){
+  if(combo == "11"){ rotateServo(servo1, SERVO_1_STOP); }
+  else if(combo == "12"){ rotateServo(servo2, SERVO_2_STOP); }
+  else if(combo == "13"){ rotateServo(servo3, SERVO_3_STOP); }
+  else if(combo == "14"){ rotateServo(servo4, SERVO_4_STOP); }
 }
 
+void rotateServo(Servo &s, int stopPos){
+  // rotatie 360° aproximativa
+  for(int i=0;i<2;i++){
+    for(int pos=0; pos<=180; pos++){ s.write(pos); delay(10); }
+    for(int pos=180; pos>=0; pos--){ s.write(pos); delay(10); }
+  }
+  s.write(stopPos); // revine la pozitia initiala
 }
 
-// ===== LCD reset =====
-void resetLCD(){
-lcd.clear();
-lcd.print("Introduceti cod");
-}
+// ===== LCD =====
+void resetLCD(){ lcd.clear(); lcd.print("Introduceti cod"); }
 
-// ===== verificare cod =====
+// ===== COD VALID =====
 bool isValidCode(String code){
-
-for(int i=0;i<4;i++){
-if(code==validCodes[i]) return true;
+  for(int i=0;i<4;i++) if(code==validCodes[i]) return true;
+  return false;
 }
 
-return false;
-}
+// ===== RESET INPUT =====
+void resetInput(){ inputIndex=0; inputCode[0]='\0'; inputCode[1]='\0'; lcd.setCursor(0,1); lcd.print("  "); }
 
-// ===== reset input =====
-void resetInput(){
-
-inputIndex=0;
-inputCode[0]='\0';
-inputCode[1]='\0';
-
-lcd.setCursor(0,1);
-lcd.print("  ");
-}
-
-// ===== citire RFID =====
+// ===== CITIRE RFID =====
 int getid(){
+  if(!rc.PICC_IsNewCardPresent()) return 0;
+  if(!rc.PICC_ReadCardSerial()) return 0;
 
-if(!rc.PICC_IsNewCardPresent()) return 0;
-if(!rc.PICC_ReadCardSerial()) return 0;
-
-for(int i=0;i<4;i++){
-readcard[i]=rc.uid.uidByte[i];
+  for(int i=0;i<4;i++) readcard[i]=rc.uid.uidByte[i];
+  rc.PICC_HaltA();
+  return 1;
 }
 
-rc.PICC_HaltA();
-return 1;
-}
-
-// ===== beep pozitiv =====
-void beepPositive(){
-
-for(int i=0;i<3;i++){
-digitalWrite(BUZZER_PIN,HIGH);
-delay(100);
-digitalWrite(BUZZER_PIN,LOW);
-delay(100);
-}
-}
-
-// ===== beep negativ =====
-void beepNegative(){
-
-digitalWrite(BUZZER_PIN,HIGH);
-delay(500);
-digitalWrite(BUZZER_PIN,LOW);
-
-}
+// ===== BEEP =====
+void beepPositive(){ for(int i=0;i<3;i++){ digitalWrite(BUZZER_PIN,HIGH); delay(100); digitalWrite(BUZZER_PIN,LOW); delay(100); } }
+void beepNegative(){ digitalWrite(BUZZER_PIN,HIGH); delay(500); digitalWrite(BUZZER_PIN,LOW); }
