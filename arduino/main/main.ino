@@ -5,6 +5,7 @@
 #include <LiquidCrystal_I2C.h>
 #include <AccelStepper.h>
 #include <Servo.h>
+#include <DHT.h>  // Biblioteca DHT
 
 // ===== LCD =====
 LiquidCrystal_I2C lcd(0x27,16,2);
@@ -77,6 +78,11 @@ int inputIndex = 0;
 // ===== CODURI =====
 String validCodes[] = {"11","12","13","14"};
 
+// ===== DHT11 =====
+#define DHTPIN 2
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
 void setup() {
   Serial.begin(9600);
   SPI.begin();
@@ -104,6 +110,9 @@ void setup() {
   lcd.setCursor(0,0);
   lcd.print("Introduceti cod");
   resetInput();
+
+  // ===== initializare DHT =====
+  dht.begin();
 }
 
 void loop() {
@@ -141,6 +150,20 @@ void loop() {
         // ===== SERVO corespunzator codului =====
         activateServo(combo);
 
+        // ===== CITIRE DHT11 =====
+        float temp = dht.readTemperature();
+        float hum = dht.readHumidity();
+        lcd.setCursor(0,1);
+        if(isnan(temp) || isnan(hum)){
+          lcd.print("DHT11 err");
+        } else {
+          lcd.print("T:");
+          lcd.print(temp);
+          lcd.print("C H:");
+          lcd.print(hum);
+          lcd.print("%");
+        }
+
       } else {
         lcd.clear(); lcd.print("Acces respins");
         beepNegative();
@@ -173,7 +196,6 @@ void activateServo(String combo){
 }
 
 void rotateServo(Servo &s, int stopPos){
-  // rotatie 360° aproximativa
   for(int i=0;i<2;i++){
     for(int pos=0; pos<=180; pos++){ s.write(pos); delay(10); }
     for(int pos=180; pos>=0; pos--){ s.write(pos); delay(10); }
