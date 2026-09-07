@@ -45,9 +45,9 @@ AccelStepper stepper2(AccelStepper::DRIVER, STEP2, DIR2);
 #define PIN_SERVO_3 42
 #define PIN_SERVO_4 43
 
-#define SERVO_1_STOP 90
+#define SERVO_1_STOP 23 // 90
 #define SERVO_2_STOP 90
-#define SERVO_3_STOP 23
+#define SERVO_3_STOP 90 // 23
 #define SERVO_4_STOP 90
 
 Servo servo1;
@@ -88,6 +88,26 @@ DHT dht(DHTPIN, DHTTYPE);
 #define GREEN_LED 6
 #define RED_LED 7
 
+// ==== PUSH BUTTON ====
+#define BUTTON_DOWN_PIN 38
+#define BUTTON_UP_PIN 39
+#define BUTTON_RIGHT_PIN 44
+#define BUTTON_LEFT_PIN 45
+const unsigned long BUTTON_PRINT_INTERVAL = 500;
+unsigned long lastButtonPrint = 0;
+
+// ===== CONTROL MANUAL STEPPERI =====
+float stepper1ManualSpeed = 0.0;
+float stepper2ManualSpeed = 0.0;
+
+// FAN
+#define FAN_PIN 5
+#define FAN2_PIN 4
+#define FAN_TEMPERATURE_LIMIT 28.0
+
+// Test temporar: RC522 este verificat continuu, fara cod de acces.
+const bool RFID_DIAGNOSTIC_MODE = false;
+
 void resetRFID()
 {
   digitalWrite(RSTPIN, LOW);
@@ -97,6 +117,7 @@ void resetRFID()
   delay(50);
 
   rc.PCD_Init();
+  rc.PCD_SetAntennaGain(MFRC522::RxGain_max);
   delay(50);
 
   ultimaResetareRFID = millis();
@@ -125,7 +146,86 @@ bool verifyRFID()
     readcard[i] = rc.uid.uidByte[i];
 
   rc.PICC_HaltA();
+  rc.PCD_StopCrypto1();
   return true;
+}
+
+bool prepareRFID()
+{
+  rc.PCD_Init();
+  rc.PCD_SetAntennaGain(MFRC522::RxGain_max);
+  delay(50);
+
+  byte version = rc.PCD_ReadRegister(MFRC522::VersionReg);
+  Serial.print("RFID DEBUG: VersionReg inainte de scanare = 0x");
+  if (version < 0x10)
+    Serial.print("0");
+  Serial.println(version, HEX);
+
+  if (version == 0x00 || version == 0xFF)
+  {
+    Serial.println("RFID DEBUG: RC522 nu raspunde pe SPI");
+    return false;
+  }
+
+  return true;
+}
+
+void diagnoseRFID()
+{
+  static unsigned long lastMessage = 0;
+  static unsigned long lastVersionCheck = 0;
+
+  if (millis() - lastVersionCheck >= 5000)
+  {
+    lastVersionCheck = millis();
+    byte version = rc.PCD_ReadRegister(MFRC522::VersionReg);
+    Serial.print("RFID TEST: VersionReg = 0x");
+    if (version < 0x10)
+      Serial.print("0");
+    Serial.println(version, HEX);
+  }
+
+  if (verifyRFID())
+  {
+    Serial.print("RFID TEST: card citit, UID = ");
+    for (byte i = 0; i < rc.uid.size; i++)
+    {
+      if (rc.uid.uidByte[i] < 0x10)
+        Serial.print("0");
+      Serial.print(rc.uid.uidByte[i], HEX);
+      if (i + 1 < rc.uid.size)
+        Serial.print(":");
+    }
+    Serial.println();
+    delay(500);
+    return;
+  }
+
+  if (millis() - lastMessage >= 1000)
+  {
+    lastMessage = millis();
+    Serial.println("RFID TEST: modul activ, niciun card detectat");
+  }
+}
+
+void updateFans()
+{
+  float temperature = dht.readTemperature();
+  bool fansOn = !isnan(temperature) && temperature > FAN_TEMPERATURE_LIMIT;
+
+  digitalWrite(FAN_PIN, fansOn ? HIGH : LOW);
+  digitalWrite(FAN2_PIN, fansOn ? HIGH : LOW);
+}
+
+void waitWithFanMonitoring(unsigned long duration)
+{
+  unsigned long start = millis();
+  while (millis() - start < duration)
+  {
+    updateFans();
+    delay(50);
+  }
 }
 
 void enableSteppers()
@@ -143,10 +243,17 @@ void disableSteppers()
 void setup()
 {
   Serial.begin(9600);
+  Serial1.begin(9600); // Comunicarea cu ESP32
   pinMode(RSTPIN, OUTPUT);
   digitalWrite(RSTPIN, HIGH);
+  pinMode(SSPIN, OUTPUT);
+  digitalWrite(SSPIN, HIGH);
   SPI.begin();
   rc.PCD_Init();
+  rc.PCD_SetAntennaGain(MFRC522::RxGain_max);
+  ultimaResetareRFID = millis();
+  Serial.println("RC522 initializat. Versiune citita:");
+  rc.PCD_DumpVersionToSerial();
 
   pinMode(EN1, OUTPUT);
   pinMode(EN2, OUTPUT);
@@ -178,6 +285,13 @@ void setup()
   servo4.write(SERVO_4_STOP);
 
   pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+
+  pinMode(BUTTON_DOWN_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_UP_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_RIGHT_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_LEFT_PIN, INPUT_PULLUP);
 
   lcd.begin();
   lcd.backlight();
@@ -187,17 +301,139 @@ void setup()
 
   // ===== initializare DHT =====
   dht.begin();
+  pinMode(FAN_PIN, OUTPUT);
+  pinMode(FAN2_PIN, OUTPUT);
+  digitalWrite(FAN_PIN, LOW);  // ventilator oprit
+  digitalWrite(FAN2_PIN, LOW); // ventilator oprit
 }
-
+int fanState = 0;
 void loop()
 {
-  maintainRFIDActiv();
+  updateFans();
+
+  if (RFID_DIAGNOSTIC_MODE)
+  {
+    diagnoseRFID();
+    return;
+  }
+
+  // Monitorizarea temperaturii ramane activa in orice stare a ciclului.
+  updateFans();
+
+  bool downButton = (digitalRead(BUTTON_DOWN_PIN) == LOW);
+  bool upButton = (digitalRead(BUTTON_UP_PIN) == LOW);
+  bool rightButton = (digitalRead(BUTTON_RIGHT_PIN) == LOW);
+  bool leftButton = (digitalRead(BUTTON_LEFT_PIN) == LOW);
+
+  stepper1ManualSpeed = 0.0;
+  stepper2ManualSpeed = 0.0;
+
+  // DownButton: both steppers move together with -800
+  if (downButton)
+  {
+    stepper1ManualSpeed -= 800.0;
+    stepper2ManualSpeed -= 800.0;
+  }
+
+  // UpButton: both steppers move together with +800
+  if (upButton)
+  {
+    stepper1ManualSpeed += 800.0;
+    stepper2ManualSpeed += 800.0;
+  }
+
+  // RightButton: stepper1 +800, stepper2 -800
+  if (rightButton)
+  {
+    stepper1ManualSpeed += 800.0;
+    stepper2ManualSpeed -= 800.0;
+  }
+
+  // LeftButton: stepper1 -800, stepper2 +800
+  if (leftButton)
+  {
+    stepper1ManualSpeed -= 800.0;
+    stepper2ManualSpeed += 800.0;
+  }
+
+  if (stepper1ManualSpeed != 0.0)
+  {
+    enableSteppers();
+    stepper1.setSpeed(stepper1ManualSpeed);
+    stepper1.runSpeed();
+  }
+  else
+  {
+    stepper1.setSpeed(0);
+    stepper1.stop();
+  }
+
+  if (stepper2ManualSpeed != 0.0)
+  {
+    enableSteppers();
+    stepper2.setSpeed(stepper2ManualSpeed);
+    stepper2.runSpeed();
+  }
+  else
+  {
+    stepper2.setSpeed(0);
+    stepper2.stop();
+  }
+
+  if (stepper1ManualSpeed == 0.0 && stepper2ManualSpeed == 0.0)
+  {
+    disableSteppers();
+  }
+
+  unsigned long now = millis();
+  if (now - lastButtonPrint >= BUTTON_PRINT_INTERVAL)
+  {
+    lastButtonPrint = now;
+
+    Serial.print("Down:");
+    Serial.print(downButton ? "1" : "0");
+    Serial.print(" Up:");
+    Serial.print(upButton ? "1" : "0");
+    Serial.print(" Right:");
+    Serial.print(rightButton ? "1" : "0");
+    Serial.print(" Left:");
+    Serial.println(leftButton ? "1" : "0");
+  }
+
+  // Resetarea periodica poate intrerupe o citire RFID in curs.
+  // maintainRFIDActiv();
   char key = keypad.getKey();
-  // Serial.println(dht.readTemperature());
+
+  /*
+  if (dht.readTemperature() > 26)
+  {
+    digitalWrite(FAN_PIN, HIGH);
+    Serial.println(dht.readTemperature());
+  }
+  else
+  {
+    digitalWrite(FAN_PIN, LOW);
+  }
+  // Trimitem catre ESP32
+  // Serial1.print("TEMP:");
+  // Serial1.println(dht.readTemperature());
+
+  // Optional, trimitem si umiditatea
+  // Serial1.print("HUM:");
+  // Serial1.println(dht.readHumidity());
+  // fanState = !fanState;
+  // Serial1.print("FAN:");
+  // Serial1.println(fanState);
+  // delay(2000);
+  */
+
   if (key && inputIndex < 2)
   {
     inputCode[inputIndex] = key;
     inputIndex++;
+    inputCode[inputIndex] = '\0';
+    Serial.print("Tasta apasata: ");
+    Serial.println(key);
     lcd.setCursor(0, 1);
     lcd.print("  ");
     lcd.setCursor(0, 1);
@@ -207,13 +443,16 @@ void loop()
   if (inputIndex == 2)
   {
     String combo = String(inputCode[0]) + String(inputCode[1]);
+    Serial.print("Cod introdus: ");
+    Serial.println(combo);
 
     if (!isValidCode(combo))
     {
+      Serial.println("Cod invalid. Incercati din nou.");
       lcd.clear();
       lcd.print("Cod invalid");
       beepNegative();
-      delay(1500);
+      waitWithFanMonitoring(1500);
       resetLCD();
       resetInput();
       return;
@@ -221,73 +460,193 @@ void loop()
 
     lcd.clear();
     lcd.print("Scanati card");
+    Serial.println("Cod valid. Astept scanarea cardului...");
 
-    if (verifyRFID())
+    const unsigned long RFID_WAIT_TIMEOUT = 5000;
+    bool cardRead = false;
+    bool rfidReady = false;
+    unsigned long startRFID = millis();
+    unsigned long lastRFIDRetry = 0;
+
+    while (millis() - startRFID < RFID_WAIT_TIMEOUT)
     {
-      int match = 1;
-      for (int i = 0; i < N; i++)
-        if (!memcmp(readcard, defcard[i], 4))
-          match++;
+      updateFans();
 
-      if (match)
+      if (!rfidReady && millis() - lastRFIDRetry >= 1000)
       {
+        lastRFIDRetry = millis();
+        rfidReady = prepareRFID();
+      }
+
+      if (rfidReady && verifyRFID())
+      {
+        cardRead = true;
+        break;
+      }
+
+      delay(20);
+    }
+
+    if (cardRead)
+    {
+      bool cardValid = false;
+      for (int i = 0; i < N; i++)
+      {
+        if (!memcmp(readcard, defcard[i], 4))
+        {
+          cardValid = true;
+          break;
+        }
+      }
+
+      Serial.print("Card scanat. UID: ");
+      for (int i = 0; i < 4; i++)
+      {
+        if (readcard[i] < 0x10)
+          Serial.print("0");
+        Serial.print(readcard[i], HEX);
+        if (i < 3)
+          Serial.print(":");
+      }
+      Serial.println();
+
+      if (cardValid)
+      {
+        Serial.println("Card valid. Bip pozitiv si LED verde.");
         lcd.clear();
         lcd.print("Acces permis");
         beepPositive();
 
-        // ===== STEPPELERE =====
-        activateSteppers();
+        movePlatformToCode(combo);
 
-        // ===== SERVO corespunzator codului =====
         activateServo(combo);
+        returnPlatformHome(combo);
 
-        // ===== CITIRE DHT11 =====
-        float temp = dht.readTemperature();
-        float hum = dht.readHumidity();
-        lcd.setCursor(0, 1);
-        if (isnan(temp) || isnan(hum))
-        {
-          lcd.print("DHT11 err");
-        }
-        else
-        {
-          lcd.print("T:");
-          lcd.print(temp);
-          lcd.print("C H:");
-          lcd.print(hum);
-          lcd.print("%");
-        }
+        // ===== STEPPERE: revenire la pozitia HOME =====
+        // Aici se va adauga revenirea platformei la pozitia de home.
       }
       else
       {
+        Serial.println("Card necunoscut. Bip lung si LED rosu.");
         lcd.clear();
-        lcd.print("Acces respins");
+        lcd.print("Card invalid");
         beepNegative();
       }
 
-      delay(2000);
+      /*
+      // ===== STEPPELERE =====
+      activateSteppers();
+
+      // ===== SERVO corespunzator codului =====
+      activateServo(combo);
+
+      // ===== CITIRE DHT11 =====
+      float temp = dht.readTemperature();
+      float hum = dht.readHumidity();
+      */
+
+      waitWithFanMonitoring(1500);
+      resetLCD();
+      resetInput();
+    }
+    else
+    {
+      Serial.println("RFID DEBUG: timeout dupa 5 secunde. Acces pozitiv pentru test.");
+      lcd.clear();
+      lcd.print("Acces test OK");
+      beepPositive();
+
+      movePlatformToCode(combo);
+
+      activateServo(combo);
+      returnPlatformHome(combo);
+
+      waitWithFanMonitoring(1500);
       resetLCD();
       resetInput();
     }
   }
 }
 
-// ===== STEPPERele =====
-void activateSteppers()
+// ===== PLATFORM MOVEMENT =====
+void moveSteppers(long stepper1Steps, long stepper2Steps)
 {
   enableSteppers();
 
-  stepper2.move(HALF_TURN);
-  while (stepper2.distanceToGo() != 0)
+  stepper1.move(stepper1Steps);
+  stepper2.move(stepper2Steps);
+
+  while (stepper1.distanceToGo() != 0 || stepper2.distanceToGo() != 0)
+  {
     stepper2.run();
-
-  delay(500);
-
-  stepper1.move(HALF_TURN);
-  while (stepper1.distanceToGo() != 0)
     stepper1.run();
+  }
 
   disableSteppers();
+}
+
+void moveUp(long steps)
+{
+  moveSteppers(steps, steps);
+}
+
+void moveDown(long steps)
+{
+  moveSteppers(-steps, -steps);
+}
+
+void moveLeft(long steps)
+{
+  moveSteppers(-steps, steps);
+}
+
+void moveRight(long steps)
+{
+  moveSteppers(steps, -steps);
+}
+
+void movePlatformToCode(String combo)
+{
+  if (combo == "12")
+  {
+    moveLeft(450);
+    moveUp(675);
+  }
+  else if (combo == "14")
+  {
+    moveUp(675);
+  }
+  else if (combo == "13")
+  {
+    moveUp(1300);
+  }
+  else if (combo == "11")
+  {
+    moveLeft(450);
+    moveUp(1300);
+  }
+}
+
+void returnPlatformHome(String combo)
+{
+  if (combo == "12")
+  {
+    moveDown(675);
+    moveRight(450);
+  }
+  else if (combo == "14")
+  {
+    moveDown(675);
+  }
+  else if (combo == "13")
+  {
+    moveDown(1300);
+  }
+  else if (combo == "11")
+  {
+    moveDown(1300);
+    moveRight(450);
+  }
 }
 
 // ===== SERVO =====
@@ -295,7 +654,7 @@ void activateServo(String combo)
 {
   if (combo == "11")
   {
-    rotateServo(servo1, SERVO_1_STOP);
+    rotateServo1();
   }
   else if (combo == "12")
   {
@@ -313,20 +672,23 @@ void activateServo(String combo)
 
 void rotateServo(Servo &s, int stopPos)
 {
-  for (int i = 0; i < 2; i++)
+  s.write(180);
+
+  unsigned long startServo = millis();
+  while (millis() - startServo < 5000)
   {
-    for (int pos = 0; pos <= 180; pos++)
-    {
-      s.write(pos);
-      delay(10);
-    }
-    for (int pos = 180; pos >= 0; pos--)
-    {
-      s.write(pos);
-      delay(10);
-    }
+    updateFans();
+    delay(50);
   }
-  s.write(stopPos); // revine la pozitia initiala
+
+  s.write(stopPos);
+}
+
+void rotateServo1()
+{
+  servo1.write(0);
+  delay(3000);
+  servo1.write(SERVO_1_STOP);
 }
 
 // ===== LCD =====
@@ -376,17 +738,17 @@ void beepPositive()
   {
     digitalWrite(BUZZER_PIN, HIGH);
     digitalWrite(GREEN_LED, HIGH);
-    delay(100);
+    waitWithFanMonitoring(100);
     digitalWrite(BUZZER_PIN, LOW);
     digitalWrite(GREEN_LED, LOW);
-    delay(100);
+    waitWithFanMonitoring(100);
   }
 }
 void beepNegative()
 {
   digitalWrite(BUZZER_PIN, HIGH);
   digitalWrite(RED_LED, HIGH);
-  delay(500);
+  waitWithFanMonitoring(500);
   digitalWrite(BUZZER_PIN, LOW);
   digitalWrite(RED_LED, LOW);
 }
