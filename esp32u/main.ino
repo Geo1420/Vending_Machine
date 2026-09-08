@@ -32,6 +32,10 @@ float temperature = 0.0;
 float humidity = 0.0;
 
 int fanState = 0;
+String lastProductCode = "";
+String productCodes[] = {"11", "12", "13", "14"};
+int productStock[] = {5, 3, 4, 2};
+float productPrices[] = {10.0, 12.5, 8.0, 9.0};
 
 
 // =====================================================
@@ -417,6 +421,130 @@ const char MAIN_page[] PROGMEM = R"rawliteral(
 
         }
 
+
+        /* =========================================
+           CONFIGURARE PRODUSE
+           ========================================= */
+
+        .config-panel {
+
+            background: white;
+
+            width: min(820px, calc(100vw - 40px));
+
+            margin: 30px auto 20px auto;
+
+            padding: 25px;
+
+            border-radius: 15px;
+
+            box-shadow:
+                0 4px 10px rgba(0,0,0,0.15);
+
+        }
+
+
+        .config-panel .title {
+
+            font-size: 22px;
+
+            margin-bottom: 20px;
+
+            color: #222;
+
+        }
+
+
+        .product-config {
+
+            display: flex;
+
+            flex-direction: column;
+
+            gap: 12px;
+
+        }
+
+
+        .product-config-row {
+
+            display: grid;
+
+            grid-template-columns: 110px 130px 130px 120px;
+
+            gap: 10px;
+
+            align-items: center;
+
+            justify-content: center;
+
+        }
+
+
+        .product-config-header {
+
+            font-weight: bold;
+
+            color: #444;
+
+            font-size: 14px;
+
+            text-align: center;
+
+        }
+
+
+        .product-code {
+
+            text-align: center;
+
+            font-weight: bold;
+
+            font-size: 21px;
+
+            color: #222;
+
+        }
+
+
+        .product-config input {
+
+            width: 110px;
+
+            padding: 8px;
+
+            border-radius: 8px;
+
+            border: 1px solid #bbb;
+
+            text-align: center;
+
+        }
+
+
+        .product-config button {
+
+            padding: 10px 14px;
+
+            border-radius: 8px;
+
+            border: none;
+
+            background: #2e7d32;
+
+            color: white;
+
+            cursor: pointer;
+
+        }
+
+
+        .product-config button:hover {
+
+            background: #256b29;
+
+        }
+
     </style>
 
 </head>
@@ -551,6 +679,82 @@ const char MAIN_page[] PROGMEM = R"rawliteral(
 
 
 <!-- =================================================
+     CONFIGURARE PRODUSE
+     ================================================= -->
+
+<div class="config-panel">
+
+    <div class="title">
+        🧃 Configurare produse
+    </div>
+
+    <div class="product-config">
+
+        <div class="product-config-row">
+            <div class="product-config-header">
+                Cod
+            </div>
+            <div class="product-config-header">
+                Cantitate
+            </div>
+            <div class="product-config-header">
+                Pret
+            </div>
+            <div class="product-config-header">
+                Acțiune
+            </div>
+        </div>
+
+        <div class="product-config-row">
+            <div class="product-code">
+                11
+            </div>
+            <input id="stock-11" type="number" min="0" value="5">
+            <input id="price-11" type="number" min="0" step="0.01" value="10.00">
+            <button onclick="saveProduct('11')">
+                Salveaza
+            </button>
+        </div>
+
+        <div class="product-config-row">
+            <div class="product-code">
+                12
+            </div>
+            <input id="stock-12" type="number" min="0" value="3">
+            <input id="price-12" type="number" min="0" step="0.01" value="12.50">
+            <button onclick="saveProduct('12')">
+                Salveaza
+            </button>
+        </div>
+
+        <div class="product-config-row">
+            <div class="product-code">
+                13
+            </div>
+            <input id="stock-13" type="number" min="0" value="4">
+            <input id="price-13" type="number" min="0" step="0.01" value="8.00">
+            <button onclick="saveProduct('13')">
+                Salveaza
+            </button>
+        </div>
+
+        <div class="product-config-row">
+            <div class="product-code">
+                14
+            </div>
+            <input id="stock-14" type="number" min="0" value="2">
+            <input id="price-14" type="number" min="0" step="0.01" value="9.00">
+            <button onclick="saveProduct('14')">
+                Salveaza
+            </button>
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =================================================
      ULTIMA ACTUALIZARE
      ================================================= -->
 
@@ -571,6 +775,58 @@ const char MAIN_page[] PROGMEM = R"rawliteral(
 
 <script>
 
+function saveProduct(code) {
+
+    const stockInput = document.getElementById("stock-" + code);
+    const priceInput = document.getElementById("price-" + code);
+
+    const payload = new URLSearchParams();
+    payload.append("code", code);
+    payload.append("quantity", stockInput.value);
+    payload.append("price", priceInput.value);
+
+    fetch("/setProduct", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: payload.toString()
+    })
+    .then(response => response.json())
+    .then(result => {
+        console.log("Product updated:", result);
+        updateData();
+    })
+    .catch(error => {
+        console.log("Eroare salvare produs:", error);
+    });
+}
+
+function updateProductConfig(data) {
+
+    if (!Array.isArray(data.productStock)) {
+        return;
+    }
+
+    for (let i = 0; i < data.productStock.length; i++) {
+
+        const product = data.productStock[i];
+        const stockField = document.getElementById("stock-" + product.code);
+        const priceField = document.getElementById("price-" + product.code);
+
+        if (stockField) {
+            stockField.value = product.quantity;
+        }
+
+        if (priceField && Array.isArray(data.productPrices)) {
+            const priceProduct = data.productPrices.find(item => item.code === product.code);
+            if (priceProduct) {
+                priceField.value = priceProduct.price;
+            }
+        }
+
+    }
+}
 
 function updateData() {
 
@@ -687,6 +943,13 @@ function updateData() {
 
 
             // =====================================
+            // CONFIGURATIE PRODUSE
+            // =====================================
+
+            updateProductConfig(data);
+
+
+            // =====================================
             // TIMP ACTUALIZARE
             // =====================================
 
@@ -749,6 +1012,94 @@ void handleRoot() {
 
 
 // =====================================================
+// SET PRODUCT
+// =====================================================
+
+void handleSetProduct() {
+
+    String code =
+        server.arg("code");
+
+    String quantityArg =
+        server.arg("quantity");
+
+    String priceArg =
+        server.arg("price");
+
+    int index = -1;
+
+    for (
+        int i = 0;
+        i < 4;
+        i++
+    ) {
+
+        if (
+            productCodes[i] == code
+        ) {
+
+            index = i;
+
+            break;
+
+        }
+
+    }
+
+    if (
+        index >= 0
+    ) {
+
+        productStock[index] =
+            quantityArg.toInt();
+
+        productPrices[index] =
+            priceArg.toFloat();
+
+        // Send stock quantity from web UI to Arduino
+        Serial2.print(
+            "STOCK:"
+        );
+
+        Serial2.print(code);
+
+        Serial2.print(":");
+
+        Serial2.println(productStock[index]);
+
+        String response = "{";
+
+        response += "\"code\":\"";
+        response += code;
+        response += "\",";
+
+        response += "\"quantity\":";
+        response += String(productStock[index]);
+        response += ",";
+
+        response += "\"price\":";
+        response += String(productPrices[index], 2);
+        response += "}";
+
+        server.send(
+            200,
+            "application/json",
+            response
+        );
+
+    } else {
+
+        server.send(
+            400,
+            "application/json",
+            "{\"error\":\"product_not_found\"}"
+        );
+
+    }
+}
+
+
+// =====================================================
 // DATE JSON
 // =====================================================
 
@@ -790,6 +1141,95 @@ void handleData() {
     json += String(
         fanState
     );
+
+
+    json += ",";
+
+
+    // Cod produs selectat dupa o tranzactie reusita
+
+    json += "\"productCode\":\"";
+
+    json += lastProductCode;
+
+    json += "\"";
+
+
+    json += ",";
+
+
+    // Stoc pe coloana / produs
+
+    json += "\"productStock\":[";
+
+    for (
+        int i = 0;
+        i < 4;
+        i++
+    ) {
+
+        if (
+            i > 0
+        ) {
+
+            json += ",";
+
+        }
+
+        json += "{\"code\":\"";
+
+        json += productCodes[i];
+
+        json += "\",\"quantity\":";
+
+        json += String(
+            productStock[i]
+        );
+
+        json += "}";
+
+    }
+
+    json += "]";
+
+
+    json += ",";
+
+
+    // Preturi produs
+
+    json += "\"productPrices\":[";
+
+    for (
+        int i = 0;
+        i < 4;
+        i++
+    ) {
+
+        if (
+            i > 0
+        ) {
+
+            json += ",";
+
+        }
+
+        json += "{\"code\":\"";
+
+        json += productCodes[i];
+
+        json += "\",\"price\":";
+
+        json += String(
+            productPrices[i],
+            2
+        );
+
+        json += "}";
+
+    }
+
+    json += "]";
 
 
     json += "}";
@@ -898,6 +1338,13 @@ void setup() {
     );
 
 
+    server.on(
+        "/setProduct",
+        HTTP_POST,
+        handleSetProduct
+    );
+
+
     server.begin();
 
 
@@ -1001,6 +1448,84 @@ void loop() {
 
         }
 
+
+        // ============================================
+        // COD PRODUS
+        // ============================================
+
+        else if (
+            data.startsWith("PROD:")
+        ) {
+
+            lastProductCode =
+                data.substring(5);
+
+            Serial.print(
+                "Produs selectat: "
+            );
+
+            Serial.println(
+                lastProductCode
+            );
+
+        }
+
+        // ============================================
+        // STOC PRODUS
+        // ============================================
+
+        else if (
+            data.startsWith("STOCK:")
+        ) {
+
+            String payload =
+                data.substring(6);
+
+            int colonIndex =
+                payload.indexOf(':');
+
+            if (
+                colonIndex >= 0
+            ) {
+
+                String code =
+                    payload.substring(0, colonIndex);
+
+                int quantity =
+                    payload.substring(colonIndex + 1).toInt();
+
+                for (
+                    int i = 0;
+                    i < 4;
+                    i++
+                ) {
+
+                    if (
+                        productCodes[i] == code
+                    ) {
+
+                        productStock[i] =
+                            quantity;
+
+                        break;
+
+                    }
+
+                }
+
+                Serial.print(
+                    "Stoc actualizat pentru produs "
+                );
+
+                Serial.print(code);
+
+                Serial.print(": ");
+
+                Serial.println(quantity);
+
+            }
+
+        }
 
         // ============================================
         // VENTILATOR

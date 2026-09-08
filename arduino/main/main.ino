@@ -76,8 +76,19 @@ int inputIndex = 0;
 // ===== BUZZER =====
 #define BUZZER_PIN 8
 
-// ===== CODURI =====
-String validCodes[] = {"11", "12", "13", "14"};
+// ===== PRODUSE / STOCURI =====
+struct ProductStock
+{
+  String code;
+  int quantity;
+};
+
+ProductStock products[] = {
+  {"11", 5},
+  {"12", 3},
+  {"13", 4},
+  {"14", 2}
+};
 
 // ===== DHT11 =====
 #define DHTPIN 2
@@ -309,6 +320,7 @@ void setup()
 int fanState = 0;
 void loop()
 {
+  updateProductStockFromESP32();
   updateFans();
 
   if (RFID_DIAGNOSTIC_MODE)
@@ -458,6 +470,18 @@ void loop()
       return;
     }
 
+    if (!isProductAvailable(combo))
+    {
+      Serial.println("Produs indisponibil. Stoc zero.");
+      lcd.clear();
+      lcd.print("Produs indisponibil");
+      beepLongNegative();
+      waitWithFanMonitoring(1500);
+      resetLCD();
+      resetInput();
+      return;
+    }
+
     lcd.clear();
     lcd.print("Scanati card");
     Serial.println("Cod valid. Astept scanarea cardului...");
@@ -510,12 +534,14 @@ void loop()
       }
       Serial.println();
 
-      if (cardValid)
+          if (cardValid)
       {
         Serial.println("Card valid. Bip pozitiv si LED verde.");
         lcd.clear();
         lcd.print("Acces permis");
         beepPositive();
+
+        registerSuccessfulProductSale(combo);
 
         movePlatformToCode(combo);
 
@@ -555,6 +581,8 @@ void loop()
       lcd.clear();
       lcd.print("Acces test OK");
       beepPositive();
+
+      registerSuccessfulProductSale(combo);
 
       movePlatformToCode(combo);
 
@@ -698,13 +726,92 @@ void resetLCD()
   lcd.print("Introduceti cod");
 }
 
+// ===== SYNCHRONIZE PRODUCT STOCK FROM ESP32 =====
+void updateProductStockFromESP32()
+{
+  if (!Serial1.available())
+    return;
+
+  String data = Serial1.readStringUntil('\n');
+  data.trim();
+
+  if (!data.startsWith("STOCK:"))
+    return;
+
+  String payload = data.substring(6);
+  int colonIndex = payload.indexOf(':');
+
+  if (colonIndex < 0)
+    return;
+
+  String code = payload.substring(0, colonIndex);
+  int quantity = payload.substring(colonIndex + 1).toInt();
+
+  int idx = findProductIndex(code);
+  if (idx >= 0)
+  {
+    products[idx].quantity = quantity;
+    Serial.print("Stock sincronizat Arduino pentru ");
+    Serial.print(code);
+    Serial.print(": ");
+    Serial.println(quantity);
+  }
+}
+
 // ===== COD VALID =====
-bool isValidCode(String code)
+int findProductIndex(String code)
 {
   for (int i = 0; i < 4; i++)
-    if (code == validCodes[i])
-      return true;
-  return false;
+    if (code == products[i].code)
+      return i;
+
+  return -1;
+}
+
+int getProductQuantity(String code)
+{
+  int idx = findProductIndex(code);
+  if (idx == -1)
+    return 0;
+
+  return products[idx].quantity;
+}
+
+bool isProductAvailable(String code)
+{
+  return getProductQuantity(code) > 0;
+}
+
+bool isValidCode(String code)
+{
+  return findProductIndex(code) != -1;
+}
+
+void registerSuccessfulProductSale(String code)
+{
+  int idx = findProductIndex(code);
+  if (idx == -1)
+    return;
+
+  if (products[idx].quantity > 0)
+  {
+    products[idx].quantity--;
+  }
+
+  Serial1.print("PROD:");
+  Serial1.println(code);
+
+  Serial1.print("STOCK:");
+  Serial1.print(products[idx].code);
+  Serial1.print(":");
+  Serial1.println(products[idx].quantity);
+
+  Serial.print("Produs selectat: ");
+  Serial.println(code);
+  Serial.print("Stoc ramas pentru cod ");
+  Serial.print(code);
+  Serial.print(": ");
+  Serial.println(products[idx].quantity);
 }
 
 // ===== RESET INPUT =====
@@ -749,6 +856,15 @@ void beepNegative()
   digitalWrite(BUZZER_PIN, HIGH);
   digitalWrite(RED_LED, HIGH);
   waitWithFanMonitoring(500);
+  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(RED_LED, LOW);
+}
+
+void beepLongNegative()
+{
+  digitalWrite(BUZZER_PIN, HIGH);
+  digitalWrite(RED_LED, HIGH);
+  waitWithFanMonitoring(1500);
   digitalWrite(BUZZER_PIN, LOW);
   digitalWrite(RED_LED, LOW);
 }
