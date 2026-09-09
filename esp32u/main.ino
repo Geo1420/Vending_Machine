@@ -1,5 +1,6 @@
 #include <WiFi.h>
 #include <WebServer.h>
+#include <SPIFFS.h>
 
 // =====================================================
 // WiFi
@@ -37,6 +38,9 @@ String productCodes[] = {"11", "12", "13", "14"};
 int productStock[] = {5, 3, 4, 2};
 float productPrices[] = {10.0, 12.5, 8.0, 9.0};
 
+const unsigned long MAX_EXECUTION_SLICE_MS = 50;
+const char* INVENTORY_FILE = "/products.json";
+const int INVENTORY_PRODUCT_COUNT = 4;
 
 // =====================================================
 // PAGINA WEB
@@ -423,7 +427,7 @@ const char MAIN_page[] PROGMEM = R"rawliteral(
 
 
         /* =========================================
-           CONFIGURARE PRODUSE
+           PRODUCT CONFIGURATION
            ========================================= */
 
         .config-panel {
@@ -679,13 +683,13 @@ const char MAIN_page[] PROGMEM = R"rawliteral(
 
 
 <!-- =================================================
-     CONFIGURARE PRODUSE
+     PRODUCT CONFIGURATION
      ================================================= -->
 
 <div class="config-panel">
 
     <div class="title">
-        🧃 Configurare produse
+        🧃 Product configuration
     </div>
 
     <div class="product-config">
@@ -798,7 +802,7 @@ function saveProduct(code) {
         updateData();
     })
     .catch(error => {
-        console.log("Eroare salvare produs:", error);
+        console.log("Product save error:", error);
     });
 }
 
@@ -943,14 +947,14 @@ function updateData() {
 
 
             // =====================================
-            // CONFIGURATIE PRODUSE
+            // PRODUCT CONFIGURATION
             // =====================================
 
             updateProductConfig(data);
 
 
             // =====================================
-            // TIMP ACTUALIZARE
+            // UPDATE TIME
             // =====================================
 
             document.getElementById(
@@ -996,6 +1000,228 @@ updateData();
 
 )rawliteral";
 
+
+String extractJsonField(const String& text, const String& fieldName)
+{
+    int fieldPos = text.indexOf("\"" + fieldName + "\"");
+    if (fieldPos < 0) {
+        return "";
+    }
+
+    int colonPos = text.indexOf(':', fieldPos);
+    int valueStart = text.indexOf('"', colonPos);
+    if (valueStart < 0) {
+        return "";
+    }
+
+    int valueEnd = text.indexOf('"', valueStart + 1);
+    if (valueEnd < 0) {
+        return "";
+    }
+
+    return text.substring(valueStart + 1, valueEnd);
+}
+
+int extractJsonIntField(const String& text, const String& fieldName)
+{
+    int fieldPos = text.indexOf("\"" + fieldName + "\"");
+    if (fieldPos < 0) {
+        return 0;
+    }
+
+    int colonPos = text.indexOf(':', fieldPos);
+    int valueEnd = text.indexOf(',', colonPos);
+    if (valueEnd < 0) {
+        valueEnd = text.indexOf('}', colonPos);
+    }
+    if (valueEnd < 0) {
+        return 0;
+    }
+
+    String value = text.substring(colonPos + 1, valueEnd);
+    value.trim();
+    return value.toInt();
+}
+
+float extractJsonFloatField(const String& text, const String& fieldName)
+{
+    int fieldPos = text.indexOf("\"" + fieldName + "\"");
+    if (fieldPos < 0) {
+        return 0.0f;
+    }
+
+    int colonPos = text.indexOf(':', fieldPos);
+    int valueEnd = text.indexOf(',', colonPos);
+    if (valueEnd < 0) {
+        valueEnd = text.indexOf('}', colonPos);
+    }
+    if (valueEnd < 0) {
+        return 0.0f;
+    }
+
+    String value = text.substring(colonPos + 1, valueEnd);
+    value.trim();
+    return value.toFloat();
+}
+
+bool saveInventoryToJson()
+{
+    if (!SPIFFS.begin(true)) {
+        Serial.println("SPIFFS begin failed");
+        return false;
+    }
+
+    File file = SPIFFS.open(INVENTORY_FILE, FILE_WRITE);
+    if (!file) {
+        Serial.println("Unable to open inventory file for write");
+        return false;
+    }
+
+    file.print("{\"products\":[");
+    for (int i = 0; i < INVENTORY_PRODUCT_COUNT; i++) {
+        if (i > 0) {
+            file.print(",");
+        }
+
+        file.print("{\"code\":\"");
+        file.print(productCodes[i]);
+        file.print("\",\"stock\":");
+        file.print(productStock[i]);
+        file.print(",\"price\":");
+        file.print(productPrices[i], 2);
+        file.print("}");
+    }
+    file.print("]}");
+    file.close();
+    return true;
+}
+
+bool loadInventoryFromJson()
+{
+    if (!SPIFFS.begin(true)) {
+        Serial.println("SPIFFS begin failed");
+        return false;
+    }
+
+    if (!SPIFFS.exists(INVENTORY_FILE)) {
+        Serial.println("Inventory file missing, creating default one");
+        return saveInventoryToJson();
+    }
+
+    File file = SPIFFS.open(INVENTORY_FILE, FILE_READ);
+    if (!file) {
+        Serial.println("Unable to open inventory file");
+        return false;
+    }
+
+    String payload = file.readString();
+    file.close();
+
+    int arrayStart = payload.indexOf("\"products\"");
+    if (arrayStart < 0) {
+        return false;
+    }
+
+    arrayStart = payload.indexOf('[', arrayStart);
+    int arrayEnd = payload.lastIndexOf(']');
+    String productList = payload.substring(arrayStart + 1, arrayEnd);
+
+    int cursor = 0;
+    for (int i = 0; i < INVENTORY_PRODUCT_COUNT; i++) {
+        int objStart = productList.indexOf('{', cursor);
+        int objEnd = productList.indexOf('}', objStart);
+        if (objStart < 0 || objEnd < 0) {
+            break;
+        }
+
+        String item = productList.substring(objStart, objEnd + 1);
+        String code = extractJsonField(item, "code");
+        int stock = extractJsonIntField(item, "stock");
+        float price = extractJsonFloatField(item, "price");
+
+        if (code.length() > 0) {
+            productCodes[i] = code;
+            productStock[i] = stock;
+            productPrices[i] = price;
+        }
+
+        cursor = objEnd + 1;
+    }
+
+    return true;
+}
+
+void syncInventoryToArduino()
+{
+    for (int i = 0; i < INVENTORY_PRODUCT_COUNT; i++) {
+        Serial2.print("STOCK:");
+        Serial2.print(productCodes[i]);
+        Serial2.print(":");
+        Serial2.println(productStock[i]);
+    }
+}
+
+void handleSerial2Data()
+{
+    if (!Serial2.available()) {
+        return;
+    }
+
+    String data = Serial2.readStringUntil('\n');
+    data.trim();
+
+    if (data.startsWith("TEMP:")) {
+        String value = data.substring(5);
+        temperature = value.toFloat();
+        Serial.print("Temperatura: ");
+        Serial.print(temperature);
+        Serial.println(" °C");
+    }
+    else if (data.startsWith("HUM:")) {
+        String value = data.substring(4);
+        humidity = value.toFloat();
+        Serial.print("Umiditate: ");
+        Serial.print(humidity);
+        Serial.println(" %");
+    }
+    else if (data.startsWith("PROD:")) {
+        lastProductCode = data.substring(5);
+        Serial.print("Selected product: ");
+        Serial.println(lastProductCode);
+    }
+    else if (data.startsWith("STOCK:")) {
+        String payload = data.substring(6);
+        int colonIndex = payload.indexOf(':');
+
+        if (colonIndex >= 0) {
+            String code = payload.substring(0, colonIndex);
+            int quantity = payload.substring(colonIndex + 1).toInt();
+
+            for (int i = 0; i < 4; i++) {
+                if (productCodes[i] == code) {
+                    productStock[i] = quantity;
+                    break;
+                }
+            }
+
+            Serial.print("Updated stock for product ");
+            Serial.print(code);
+            Serial.print(": ");
+            Serial.println(quantity);
+        }
+    }
+    else if (data.startsWith("FAN:")) {
+        String value = data.substring(4);
+        fanState = value.toInt();
+        Serial.print("Ventilator: ");
+
+        if (fanState == 1) {
+            Serial.println("PORNIT");
+        } else {
+            Serial.println("OPRIT");
+        }
+    }
+}
 
 // =====================================================
 // PAGINA PRINCIPALA
@@ -1056,16 +1282,11 @@ void handleSetProduct() {
         productPrices[index] =
             priceArg.toFloat();
 
+        // persist inventory into JSON file first
+        saveInventoryToJson();
+
         // Send stock quantity from web UI to Arduino
-        Serial2.print(
-            "STOCK:"
-        );
-
-        Serial2.print(code);
-
-        Serial2.print(":");
-
-        Serial2.println(productStock[index]);
+        syncInventoryToArduino();
 
         String response = "{";
 
@@ -1146,7 +1367,7 @@ void handleData() {
     json += ",";
 
 
-    // Cod produs selectat dupa o tranzactie reusita
+    // Selected product code after a successful transaction
 
     json += "\"productCode\":\"";
 
@@ -1158,7 +1379,7 @@ void handleData() {
     json += ",";
 
 
-    // Stoc pe coloana / produs
+    // Stock per column / product
 
     json += "\"productStock\":[";
 
@@ -1196,7 +1417,7 @@ void handleData() {
     json += ",";
 
 
-    // Preturi produs
+    // Product prices
 
     json += "\"productPrices\":[";
 
@@ -1269,6 +1490,14 @@ void setup() {
         RX_PIN,
         TX_PIN
     );
+
+    // ================================================
+    // SPIFFS inventory
+    // ================================================
+
+    SPIFFS.begin(true);
+    loadInventoryFromJson();
+    syncInventoryToArduino();
 
 
     // ================================================
@@ -1360,241 +1589,26 @@ void setup() {
 // =====================================================
 
 void loop() {
-
-
-    // ================================================
-    // Web Server
-    // ================================================
-
-    server.handleClient();
-
-
-    // ================================================
-    // Date Arduino Mega
-    // ================================================
-
-    if (
-        Serial2.available()
-    ) {
-
-
-        String data =
-            Serial2.readStringUntil('\n');
-
-
-        data.trim();
-
-
-        // ============================================
-        // TEMPERATURA
-        // ============================================
-
-        if (
-            data.startsWith("TEMP:")
-        ) {
-
-
-            String value =
-                data.substring(5);
-
-
-            temperature =
-                value.toFloat();
-
-
-            Serial.print(
-                "Temperatura: "
-            );
-
-            Serial.print(
-                temperature
-            );
-
-            Serial.println(
-                " °C"
-            );
-
-        }
-
-
-        // ============================================
-        // UMIDITATE
-        // ============================================
-
-        else if (
-            data.startsWith("HUM:")
-        ) {
-
-
-            String value =
-                data.substring(4);
-
-
-            humidity =
-                value.toFloat();
-
-
-            Serial.print(
-                "Umiditate: "
-            );
-
-            Serial.print(
-                humidity
-            );
-
-            Serial.println(
-                " %"
-            );
-
-        }
-
-
-        // ============================================
-        // COD PRODUS
-        // ============================================
-
-        else if (
-            data.startsWith("PROD:")
-        ) {
-
-            lastProductCode =
-                data.substring(5);
-
-            Serial.print(
-                "Produs selectat: "
-            );
-
-            Serial.println(
-                lastProductCode
-            );
-
-        }
-
-        // ============================================
-        // STOC PRODUS
-        // ============================================
-
-        else if (
-            data.startsWith("STOCK:")
-        ) {
-
-            String payload =
-                data.substring(6);
-
-            int colonIndex =
-                payload.indexOf(':');
-
-            if (
-                colonIndex >= 0
-            ) {
-
-                String code =
-                    payload.substring(0, colonIndex);
-
-                int quantity =
-                    payload.substring(colonIndex + 1).toInt();
-
-                for (
-                    int i = 0;
-                    i < 4;
-                    i++
-                ) {
-
-                    if (
-                        productCodes[i] == code
-                    ) {
-
-                        productStock[i] =
-                            quantity;
-
-                        break;
-
-                    }
-
-                }
-
-                Serial.print(
-                    "Stoc actualizat pentru produs "
-                );
-
-                Serial.print(code);
-
-                Serial.print(": ");
-
-                Serial.println(quantity);
-
-            }
-
-        }
-
-        // ============================================
-        // VENTILATOR
-        // ============================================
-
-        else if (
-            data.startsWith("FAN:")
-        ) {
-
-
-            String value =
-                data.substring(4);
-
-
-            fanState =
-                value.toInt();
-
-
-            Serial.print(
-                "Ventilator: "
-            );
-
-
-            if (
-                fanState == 1
-            ) {
-
-                Serial.println(
-                    "PORNIT"
-                );
-
-            } else {
-
-                Serial.println(
-                    "OPRIT"
-                );
-
-            }
-
-        }
-
+    static unsigned long lastSerialTask = 0;
+    static unsigned long lastServerTask = 0;
+
+    // Handle the HTTP layer in small service slices, but allow the UI
+    // and the logging instructions to remain independent from the task budget.
+    if (millis() - lastServerTask >= MAX_EXECUTION_SLICE_MS) {
+        server.handleClient();
+        lastServerTask = millis();
     }
 
+    // Keep the Arduino serial event parser in a bounded 50 ms task window.
+    if (millis() - lastSerialTask >= MAX_EXECUTION_SLICE_MS) {
+        handleSerial2Data();
+        lastSerialTask = millis();
+    }
 
-    // ================================================
-    // Verificare WiFi
-    // ================================================
-
-    if (
-        WiFi.status() != WL_CONNECTED
-    ) {
-
-
-        Serial.println(
-            "WiFi deconectat!"
-        );
-
-
+    // WiFi recovery is allowed to reconnect without any long blocking delay.
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("WiFi deconectat!");
         WiFi.disconnect();
-
-
-        WiFi.begin(
-            ssid,
-            password
-        );
-
-
-        delay(5000);
-
+        WiFi.begin(ssid, password);
     }
-
 }
