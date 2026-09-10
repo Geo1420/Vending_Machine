@@ -1,17 +1,4 @@
 #include "product.h"
-#include "display.h"
-#include "platform.h"
-#include "environment.h"
-
-void initializeProductSerial()
-{
-  Serial1.begin(9600);
-}
-
-void initializeProductLogic()
-{
-  initializeProductSerial();
-}
 
 ProductStock products[PRODUCT_LOOKUP_COUNT] = {
   {"11", 5},
@@ -48,61 +35,6 @@ bool isValidCode(String code)
   return findProductIndex(code) != -1;
 }
 
-bool processProductSelection(const String& code)
-{
-  if (!isValidCode(code))
-  {
-    beepNegative();
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Invalid code");
-    waitWithFanMonitoring(50);
-    resetLCD();
-    return false;
-  }
-
-  int idx = findProductIndex(code);
-  if (idx < 0)
-  {
-    beepNegative();
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Unknown");
-    waitWithFanMonitoring(50);
-    resetLCD();
-    return false;
-  }
-
-  if (getProductQuantity(code) <= 0)
-  {
-    beepLongNegative();
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Out of stock");
-    waitWithFanMonitoring(50);
-    resetLCD();
-    return false;
-  }
-
-  movePlatformToCode(code);
-  activateServo(code);
-
-  registerSuccessfulProductSale(code);
-
-  returnPlatformHome(code);
-
-  beepPositive();
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Dispensed");
-  lcd.setCursor(0, 1);
-  lcd.print(code);
-  waitWithFanMonitoring(50);
-  resetLCD();
-
-  return true;
-}
-
 void registerSuccessfulProductSale(String code)
 {
   int idx = findProductIndex(code);
@@ -122,9 +54,9 @@ void registerSuccessfulProductSale(String code)
   Serial1.print(":");
   Serial1.println(products[idx].quantity);
 
-  Serial.print("Selected product: ");
+  Serial.print("Produs selectat: ");
   Serial.println(code);
-  Serial.print("Remaining stock for code ");
+  Serial.print("Stoc ramas pentru cod ");
   Serial.print(code);
   Serial.print(": ");
   Serial.println(products[idx].quantity);
@@ -137,6 +69,16 @@ void updateProductStockFromESP32()
 
   String data = Serial1.readStringUntil(SERIAL_READ_TERMINATOR);
   data.trim();
+
+  if (data.startsWith("FAN_THRESHOLD:"))
+  {
+    String payload = data.substring(strlen("FAN_THRESHOLD:"));
+    fanTemperatureLimit = payload.toFloat();
+
+    Serial.print("Prag ventilator sincronizat Arduino: ");
+    Serial.println(fanTemperatureLimit);
+    return;
+  }
 
   if (!data.startsWith(STOCK_SYNC_TOKEN))
     return;
@@ -154,7 +96,7 @@ void updateProductStockFromESP32()
   if (idx >= 0)
   {
     products[idx].quantity = quantity;
-    Serial.print("Arduino stock synchronized for ");
+    Serial.print("Stock sincronizat Arduino pentru ");
     Serial.print(code);
     Serial.print(": ");
     Serial.println(quantity);

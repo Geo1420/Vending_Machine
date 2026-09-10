@@ -3,13 +3,11 @@
 
 #include "common.h"
 
-void initializeRFID();
 void resetRFID();
-void maintainRFIDActive();
+void maintainRFIDActiv();
 bool verifyRFID();
 bool prepareRFID();
 void diagnoseRFID();
-bool processRFIDCard();
 int getid();
 
 #endif

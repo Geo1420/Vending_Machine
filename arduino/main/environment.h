@@ -3,7 +3,7 @@
 
 #include "common.h"
 
-void initializeEnvironment();
+float readTemperatureFourSamples();
 void updateFans();
 void waitWithFanMonitoring(unsigned long duration);
 void enableSteppers();

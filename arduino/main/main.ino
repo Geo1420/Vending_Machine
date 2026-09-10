@@ -21,7 +21,6 @@ void setup()
   initializeProductLogic();
 
   resetLCD();
-  Serial.println("Vending Arduino sketch started");
 }
 
 void loop()

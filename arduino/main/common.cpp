@@ -13,8 +13,8 @@ byte defcard[][4] = {
 int N = 2;
 byte readcard[4];
 
-unsigned long lastRFIDReset = 0;
-const unsigned long rfidResetInterval = 3000;
+unsigned long ultimaResetareRFID = 0;
+const unsigned long intervalResetRFID = 3000;
 
 // ===== STEPPER DRIVERS =====
 AccelStepper stepper1(AccelStepper::DRIVER, STEP1, DIR1);
@@ -46,6 +46,9 @@ int inputIndex = 0;
 
 // ===== DHT11 =====
 DHT dht(DHTPIN, DHTTYPE);
+
+// ===== FAN THRESHOLD =====
+float fanTemperatureLimit = DEFAULT_FAN_TEMPERATURE_LIMIT;
 
 // ===== CONTROL MANUAL STEPPERI =====
 float stepper1ManualSpeed = 0.0;

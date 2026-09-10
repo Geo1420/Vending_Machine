@@ -1,20 +1,39 @@
 #include "environment.h"
 
-void initializeEnvironment()
+float readTemperatureFourSamples()
 {
-  dht.begin();
+  float samples[4];
+  int validSamples = 0;
+  float total = 0.0f;
 
-  pinMode(EN1, OUTPUT);
-  pinMode(EN2, OUTPUT);
+  for (int i = 0; i < 4; i++)
+  {
+    float sample = dht.readTemperature();
+    if (!isnan(sample))
+    {
+      samples[validSamples] = sample;
+      total += sample;
+      validSamples++;
+    }
 
-  digitalWrite(EN1, HIGH);
-  digitalWrite(EN2, HIGH);
+    if (i < 3)
+    {
+      delay(50);
+    }
+  }
+
+  if (validSamples == 0)
+  {
+    return NAN;
+  }
+
+  return total / validSamples;
 }
 
 void updateFans()
 {
-  float temperature = dht.readTemperature();
-  bool fansOn = !isnan(temperature) && temperature > FAN_TEMPERATURE_LIMIT;
+  float temperature = readTemperatureFourSamples();
+  bool fansOn = !isnan(temperature) && temperature > fanTemperatureLimit;
 
   digitalWrite(FAN_PIN, fansOn ? HIGH : LOW);
   digitalWrite(FAN2_PIN, fansOn ? HIGH : LOW);
@@ -26,11 +45,7 @@ void waitWithFanMonitoring(unsigned long duration)
   while (millis() - start < duration)
   {
     updateFans();
-
-    unsigned long elapsed = millis() - start;
-    unsigned long remaining = duration - elapsed;
-    unsigned long slice = remaining > 50 ? 50 : remaining;
-    delay(slice);
+    delay(50);
   }
 }
 

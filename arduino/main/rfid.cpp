@@ -1,17 +1,4 @@
 #include "rfid.h"
-#include "display.h"
-
-void initializeRFID()
-{
-  if (!prepareRFID())
-  {
-    Serial.println("RFID module failed");
-  }
-  else
-  {
-    Serial.println("RFID module ready");
-  }
-}
 
 // ===== RC522 =====
 void resetRFID()
@@ -26,12 +13,12 @@ void resetRFID()
   rc.PCD_SetAntennaGain(MFRC522::RxGain_max);
   delay(50);
 
-  lastRFIDReset = millis();
+  ultimaResetareRFID = millis();
 }
 
-void maintainRFIDActive()
+void maintainRFIDActiv()
 {
-  if (millis() - lastRFIDReset >= rfidResetInterval)
+  if (millis() - ultimaResetareRFID >= intervalResetRFID)
   {
     resetRFID();
   }
@@ -63,37 +50,17 @@ bool prepareRFID()
   delay(50);
 
   byte version = rc.PCD_ReadRegister(MFRC522::VersionReg);
-  Serial.print("RFID DEBUG: VersionReg before scan = 0x");
+  Serial.print("RFID DEBUG: VersionReg inainte de scanare = 0x");
   if (version < 0x10)
     Serial.print("0");
   Serial.println(version, HEX);
 
   if (version == 0x00 || version == 0xFF)
   {
-    Serial.println("RFID DEBUG: RC522 does not respond on SPI");
+    Serial.println("RFID DEBUG: RC522 nu raspunde pe SPI");
     return false;
   }
 
-  return true;
-}
-
-bool processRFIDCard()
-{
-  if (!verifyRFID())
-    return false;
-
-  Serial.print("RFID UID:");
-  for (int i = 0; i < 4; i++)
-  {
-    if (readcard[i] < 0x10)
-      Serial.print("0");
-    Serial.print(readcard[i], HEX);
-    if (i < 3)
-      Serial.print(":");
-  }
-  Serial.println();
-
-  beepPositive();
   return true;
 }
 
@@ -114,7 +81,7 @@ void diagnoseRFID()
 
   if (verifyRFID())
   {
-    Serial.print("RFID TEST: card read, UID = ");
+    Serial.print("RFID TEST: card citit, UID = ");
     for (byte i = 0; i < rc.uid.size; i++)
     {
       if (rc.uid.uidByte[i] < 0x10)
@@ -124,14 +91,14 @@ void diagnoseRFID()
         Serial.print(":");
     }
     Serial.println();
-    waitWithFanMonitoring(50);
+    delay(500);
     return;
   }
 
   if (millis() - lastMessage >= 1000)
   {
     lastMessage = millis();
-    Serial.println("RFID TEST: active module, no card detected");
+    Serial.println("RFID TEST: modul activ, niciun card detectat");
   }
 }
 

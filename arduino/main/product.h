@@ -18,13 +18,10 @@ struct ProductStock
 
 extern ProductStock products[PRODUCT_LOOKUP_COUNT];
 
-void initializeProductSerial();
-void initializeProductLogic();
 int findProductIndex(String code);
 int getProductQuantity(String code);
 bool isProductAvailable(String code);
 bool isValidCode(String code);
-bool processProductSelection(const String& code);
 void registerSuccessfulProductSale(String code);
 void updateProductStockFromESP32();
 

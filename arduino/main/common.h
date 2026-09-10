@@ -26,8 +26,8 @@ extern byte defcard[][4];
 extern int N;
 extern byte readcard[4];
 
-extern unsigned long lastRFIDReset;
-extern const unsigned long rfidResetInterval;
+extern unsigned long ultimaResetareRFID;
+extern const unsigned long intervalResetRFID;
 
 // ===== STEPPER DRIVERS =====
 #define STEP_ONE 22
@@ -108,9 +108,10 @@ extern float stepper2ManualSpeed;
 // FAN
 #define FAN_PIN 5
 #define FAN_SECOND_PIN 4
-#define FAN_TEMPERATURE_LIMIT 28.0
-
+#define DEFAULT_FAN_TEMPERATURE_LIMIT 28.0
 #define FAN2_PIN FAN_SECOND_PIN
+
+extern float fanTemperatureLimit;
 
 extern const bool RFID_DIAGNOSTIC_MODE;
 
