@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitorizare Vending Machine</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header>
+    <h1>Monitorizare Vending Machine</h1>
+</header>
+
+<div class="container">
+
+    <div class="card temperature-card">
+        <div class="title">🌡️ Temperatura</div>
+        <div class="value">
+            <span id="temperature">24.7</span>
+            <span class="unit">°C</span>
+        </div>
+    </div>
+
+    <div class="card humidity-card">
+        <div class="title">💧 Umiditate</div>
+        <div class="value">
+            <span id="humidity">45.3</span>
+            <span class="unit">%</span>
+        </div>
+    </div>
+
+    <div class="card fan-card">
+        <div class="title">🌀 Ventilator</div>
+
+        <div class="fan-container">
+            <div id="fan" class="fan fan-running">
+                <div class="blade blade1"></div>
+                <div class="blade blade2"></div>
+                <div class="blade blade3"></div>
+                <div class="fan-center"></div>
+            </div>
+
+            <div id="wind" class="wind wind-active">)))</div>
+        </div>
+
+        <div id="fanStatus" class="fan-status fan-on">Ventilator PORNIT</div>
+    </div>
+
+</div>
+
+<section class="dashboard">
+    <div class="dashboard-title">
+        <span>📊 Dashboard vânzări</span>
+    </div>
+
+    <div class="dashboard-grid">
+        <div class="metric-card">
+            <div class="metric-label">Venit total</div>
+            <div class="metric-value" id="totalRevenue">126.50 RON</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Număr vânzări</div>
+            <div class="metric-value" id="salesCount">8</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Perioadă</div>
+            <div class="metric-value small" id="periodRange">01.09.2026 - 30.09.2026</div>
+        </div>
+    </div>
+
+    <div class="dashboard-controls">
+        <div class="control-group">
+            <label for="periodStart">Start</label>
+            <input type="date" id="periodStart" value="2026-09-01">
+        </div>
+
+        <div class="control-group">
+            <label for="periodEnd">Sfârșit</label>
+            <input type="date" id="periodEnd" value="2026-09-30">
+        </div>
+
+        <button id="applyPeriod">Aplică perioada</button>
+        <button id="resetSales" class="danger-button">Resetare date</button>
+    </div>
+
+    <div class="sales-table-wrap">
+        <table class="sales-table">
+            <thead>
+                <tr>
+                    <th>Cod produs</th>
+                    <th>Preț</th>
+                    <th>Dată vânzare</th>
+                </tr>
+            </thead>
+            <tbody id="salesTableBody">
+                <tr><td>11</td><td>10.00 RON</td><td>2026-09-09</td></tr>
+                <tr><td>12</td><td>12.50 RON</td><td>2026-09-09</td></tr>
+                <tr><td>13</td><td>8.00 RON</td><td>2026-09-10</td></tr>
+                <tr><td>14</td><td>9.00 RON</td><td>2026-09-10</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<div class="fan-threshold-panel">
+    <div class="title">🌡️ Prag ventilator</div>
+    <div class="fan-threshold-row">
+        <label for="fanTemperatureThreshold">Temperatura prag (°C)</label>
+        <input id="fanTemperatureThreshold" type="number" min="0" max="80" step="0.5" value="28.0">
+        <button id="saveFanThreshold">Salveaza prag</button>
+    </div>
+</div>
+
+<div class="config-panel">
+    <div class="title">🧃 Product configuration</div>
+
+    <div class="product-config">
+
+        <div class="product-config-row">
+            <div class="product-config-header">Cod</div>
+            <div class="product-config-header">Cantitate</div>
+            <div class="product-config-header">Pret</div>
+            <div class="product-config-header">Expirare</div>
+            <div class="product-config-header">Acțiune</div>
+        </div>
+
+        <div class="product-config-row">
+            <div class="product-code">11</div>
+            <input id="stock-11" type="number" min="0" value="5">
+            <input id="price-11" type="number" min="0" step="0.01" value="10.00">
+            <input id="expiry-11" type="date" value="2026-09-15">
+            <button onclick="saveProduct('11')">Salveaza</button>
+        </div>
+
+        <div class="product-config-row">
+            <div class="product-code">12</div>
+            <input id="stock-12" type="number" min="0" value="3">
+            <input id="price-12" type="number" min="0" step="0.01" value="12.50">
+            <input id="expiry-12" type="date" value="2026-10-15">
+            <button onclick="saveProduct('12')">Salveaza</button>
+        </div>
+
+        <div class="product-config-row">
+            <div class="product-code">13</div>
+            <input id="stock-13" type="number" min="0" value="4">
+            <input id="price-13" type="number" min="0" step="0.01" value="8.00">
+            <input id="expiry-13" type="date" value="2026-11-15">
+            <button onclick="saveProduct('13')">Salveaza</button>
+        </div>
+
+        <div class="product-config-row">
+            <div class="product-code">14</div>
+            <input id="stock-14" type="number" min="0" value="2">
+            <input id="price-14" type="number" min="0" step="0.01" value="9.00">
+            <input id="expiry-14" type="date" value="2026-12-15">
+            <button onclick="saveProduct('14')">Salveaza</button>
+        </div>
+
+    </div>
+</div>
+
+<div class="status">
+    Ultima actualizare:
+    <span id="updateTime">--</span>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
